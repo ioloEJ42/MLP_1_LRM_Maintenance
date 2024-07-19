@@ -31,7 +31,6 @@ ChartJS.register(
   zoomPlugin
 );
 
-// Component for file upload input
 const FileUpload = ({ onFileChange }) => (
   <input
     type="file"
@@ -42,7 +41,6 @@ const FileUpload = ({ onFileChange }) => (
   />
 );
 
-// Button component with custom styles
 const Button = ({ onClick, className, children }) => (
   <button
     onClick={onClick}
@@ -52,26 +50,61 @@ const Button = ({ onClick, className, children }) => (
   </button>
 );
 
-// Component to display the predicted maintenance date
-const ResultDisplay = ({ result }) => (
+const ResultDisplay = ({ result, metrics }) => (
   <div className="mt-4">
     <h2 className="text-xl text-white">
       Predicted Maintenance Date: {new Date(result).toLocaleString()}
     </h2>
+    <div className="mt-2">
+      <h3 className="text-lg text-white">Model Metrics:</h3>
+      <ul className="list-disc list-inside">
+        <li>R-Squared: {metrics.rSquared.toFixed(4)}</li>
+        <li>Mean Squared Error: {metrics.meanSquaredError.toFixed(4)}</li>
+        <li>
+          Root Mean Squared Error: {metrics.rootMeanSquaredError.toFixed(4)}
+        </li>
+        <li>
+          Cross-Validation R-Squared:{" "}
+          {metrics.crossValidation.rSquared.toFixed(4)}
+        </li>
+        <li>
+          Cross-Validation Mean Squared Error:{" "}
+          {metrics.crossValidation.meanSquaredError.toFixed(4)}
+        </li>
+        <li>
+          Cross-Validation Root Mean Squared Error:{" "}
+          {metrics.crossValidation.rootMeanSquaredError.toFixed(4)}
+        </li>
+      </ul>
+    </div>
   </div>
 );
 
-// Function to generate noisy sensor data for testing
-const generateNoisySensorData = (numSamples, noiseLevel, bias, randomSeed) => {
+const generateNoisySensorData = (
+  numSamples,
+  noiseLevel,
+  bias,
+  randomSeed,
+  trend = "positive"
+) => {
   const rows = [];
   const random = new Math.seedrandom(randomSeed);
   const startDate = new Date();
   const msPerDay = 24 * 60 * 60 * 1000;
+  let coef;
+
+  if (trend === "positive") {
+    coef = 0.5;
+  } else if (trend === "negative") {
+    coef = -0.5;
+  } else {
+    coef = 0;
+  }
 
   for (let i = 0; i < numSamples; i++) {
     const x = i;
     const noise = (random() * 2 - 1) * noiseLevel;
-    const y = x * 0.5 + bias + noise; // assuming a simple y = 0.5x + bias + noise
+    const y = x * coef + bias + noise; // y = coef * x + bias + noise
     const date = new Date(startDate.getTime() + i * msPerDay);
     rows.push({ date: date.toISOString(), y });
   }
@@ -82,32 +115,32 @@ const generateNoisySensorData = (numSamples, noiseLevel, bias, randomSeed) => {
 function App() {
   const [file, setFile] = useState(null);
   const [result, setResult] = useState(null);
+  const [metrics, setMetrics] = useState(null);
   const [csvData, setCsvData] = useState(null);
   const [showDownloadButton, setShowDownloadButton] = useState(false);
   const [chartData, setChartData] = useState(null);
   const [error, setError] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [numRows, setNumRows] = useState(100);
+  const [trend, setTrend] = useState("positive");
   const chartRef = useRef(null);
 
-  // Handle file upload change
   const handleFileChange = (e) => {
     setFile(e.target.files[0]);
   };
 
-  // Reset all states
   const handleReset = () => {
     setFile(null);
     setResult(null);
+    setMetrics(null);
     setCsvData(null);
     setShowDownloadButton(false);
     setChartData(null);
     setError(null);
   };
 
-  // Generate random CSV data for testing
   const handleGenerateCsv = () => {
-    const randomData = generateNoisySensorData(numRows, 10, 13, 42);
+    const randomData = generateNoisySensorData(numRows, 10, 13, 42, trend);
     const csvContent = d3.csvFormat(randomData);
     setCsvData(csvContent);
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
@@ -115,16 +148,17 @@ function App() {
     setFile(new Blob([csvContent], { type: "text/csv" }));
   };
 
-  // Process the data and predict maintenance date
   const processData = useCallback(async (rows) => {
     try {
+      console.log("Processing data...");
       setIsLoading(true);
       const response = await axios.post("http://localhost:5000/predict", {
         data: rows,
       });
-      const { coef, bias, start_date, predictedDate } = response.data;
+      const { coef, bias, start_date, predictedDate, metrics } = response.data;
 
       setResult(predictedDate);
+      setMetrics(metrics);
       setShowDownloadButton(true);
 
       const x = rows.map((row) => new Date(row.date));
@@ -167,26 +201,33 @@ function App() {
       setError(
         "An error occurred while processing the data. Please try again."
       );
-      console.error(err);
+      console.error("Error in processData:", err);
     } finally {
       setIsLoading(false);
     }
   }, []);
 
-  // Predict using randomly generated data
   const handlePredictWithRandomData = async () => {
-    const randomData = generateNoisySensorData(numRows, 10, 13, 42);
-    const csvContent = d3.csvFormat(randomData);
-    setCsvData(csvContent);
-    const rows = randomData.map((row) => ({
-      date: new Date(row.date),
-      y: parseFloat(row.y),
-    }));
+    try {
+      console.log("Generating random data...");
+      const randomData = generateNoisySensorData(numRows, 10, 13, 42, trend);
+      const csvContent = d3.csvFormat(randomData);
+      setCsvData(csvContent);
+      const rows = randomData.map((row) => ({
+        date: new Date(row.date),
+        y: parseFloat(row.y),
+      }));
 
-    await processData(rows);
+      console.log("Predicting with random data...");
+      await processData(rows);
+    } catch (err) {
+      setError(
+        "An error occurred while generating random data. Please try again."
+      );
+      console.error("Error in handlePredictWithRandomData:", err);
+    }
   };
 
-  // Handle form submission to process uploaded CSV file
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!file) return;
@@ -209,13 +250,11 @@ function App() {
     reader.readAsText(file);
   };
 
-  // Download used CSV data
   const handleDownloadCsv = () => {
     const blob = new Blob([csvData], { type: "text/csv;charset=utf-8;" });
     saveAs(blob, "used_data.csv");
   };
 
-  // Zoom in on the chart
   const handleZoomIn = () => {
     const chart = chartRef.current;
     if (chart) {
@@ -223,7 +262,6 @@ function App() {
     }
   };
 
-  // Zoom out on the chart
   const handleZoomOut = () => {
     const chart = chartRef.current;
     if (chart) {
@@ -231,7 +269,6 @@ function App() {
     }
   };
 
-  // Reset zoom on the chart
   const handleResetZoom = () => {
     const chart = chartRef.current;
     if (chart) {
@@ -239,9 +276,12 @@ function App() {
     }
   };
 
-  // Handle number of rows change for random data generation
   const handleNumRowsChange = (e) => {
     setNumRows(parseInt(e.target.value, 10));
+  };
+
+  const handleTrendChange = (e) => {
+    setTrend(e.target.value);
   };
 
   return (
@@ -347,6 +387,15 @@ function App() {
             className="ml-2 p-2 border rounded bg-gray-800 text-white border-gray-700"
             min="1"
           />
+          <select
+            value={trend}
+            onChange={handleTrendChange}
+            className="ml-2 p-2 border rounded bg-gray-800 text-white border-gray-700"
+          >
+            <option value="positive">Positive Trend</option>
+            <option value="negative">Negative Trend</option>
+            <option value="none">No Trend</option>
+          </select>
           <Button
             onClick={handlePredictWithRandomData}
             className="bg-purple-500 ml-4"
@@ -366,7 +415,7 @@ function App() {
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
-      {result && <ResultDisplay result={result} />}
+      {result && <ResultDisplay result={result} metrics={metrics} />}
     </div>
   );
 }
